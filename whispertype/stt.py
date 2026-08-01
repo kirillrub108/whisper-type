@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,43 @@ SAMPLE_RATE = 16000
 # Стандартная лестница температур Whisper: следующая ступень берётся,
 # только если декодирование не прошло пороги качества.
 _TEMPERATURE_LADDER = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+
+FRAMES_PER_SECOND = 100  # шаг мел-спектрограммы: 160 сэмплов при 16 кГц
+FULL_WINDOW_FRAMES = 3000  # штатное окно Whisper — 30 с
+# Запас над длиной фразы. При меньшем модель принимает набивку за речь
+# и дописывает повторы; 8 с проверены на длинах 3–20 с.
+WINDOW_MARGIN_SECONDS = 8
+
+
+def window_frames_for(duration_seconds: float, enabled: bool) -> int | None:
+    """Размер окна энкодера в кадрах. None — оставить штатные 30 с."""
+    if not enabled:
+        return None
+    frames = int((duration_seconds + WINDOW_MARGIN_SECONDS) * FRAMES_PER_SECOND)
+    if frames >= FULL_WINDOW_FRAMES:
+        return None  # окно и так полное — сужать нечего
+    return frames
+
+
+@contextlib.contextmanager
+def encoder_window(frames: int | None) -> Iterator[None]:
+    """Временно сужает окно, до которого faster-whisper набивает сегмент.
+
+    Публичного параметра для этого нет: pad_or_trim жёстко набивает до 30 с
+    независимо от длины записи, из-за чего короткая фраза стоит столько же,
+    сколько получасовая.
+    """
+    if frames is None:
+        yield
+        return
+    import faster_whisper.transcribe as ftr
+
+    original = ftr.pad_or_trim
+    ftr.pad_or_trim = lambda array, length=frames, **kwargs: original(array, length, **kwargs)
+    try:
+        yield
+    finally:
+        ftr.pad_or_trim = original
 
 
 def normalize_audio(audio: np.ndarray, target_peak: float = 0.95) -> np.ndarray:
@@ -61,6 +100,9 @@ class Transcriber:
         self._vad = vad
         self._models_dir = models_dir
         self._model: Any = None
+        # Сужение окна подменяет глобальную функцию библиотеки — два
+        # распознавания разом её бы перетёрли.
+        self._lock = threading.Lock()
 
     def is_cached(self) -> bool:
         """Модель уже скачана в локальный кэш (есть model.bin в snapshot'е HF)."""
@@ -98,9 +140,7 @@ class Transcriber:
         """
         started = time.perf_counter()
         language = self._cfg.language or (self._cfg.languages[0] if self._cfg.languages else "en")
-        segments, _info = self._decode(np.zeros(SAMPLE_RATE, dtype=np.float32), language, vad=False)
-        for _ in segments:  # генератор ленивый — декодирование идёт при переборе
-            pass
+        self._decode(np.zeros(SAMPLE_RATE, dtype=np.float32), language, vad=False)
         log.info("прогрев модели завершён за %.1f с", time.perf_counter() - started)
 
     def transcribe(self, audio: np.ndarray) -> str:
@@ -108,10 +148,8 @@ class Transcriber:
             raise RuntimeError("модель не загружена")
         if self._cfg.normalize_audio:
             audio = normalize_audio(audio)
-        segments, info = self._decode(audio, self._cfg.language)
+        text, info = self._decode(audio, self._cfg.language)
         if self._cfg.language is None:
-            # info готов до перебора сегментов, поэтому неверный язык
-            # обходится лишним проходом только когда он действительно неверный.
             override = pick_language(info.language, info.all_language_probs, self._cfg.languages)
             if override is None:
                 log.info("язык %s (p=%.2f)", info.language, info.language_probability)
@@ -120,29 +158,45 @@ class Transcriber:
                     "язык %s (p=%.2f) вне списка %s — переопределяю на %s",
                     info.language, info.language_probability, self._cfg.languages, override,
                 )
-                segments, _info = self._decode(audio, override)
-        return " ".join(seg.text.strip() for seg in segments).strip()
+                text, _info = self._decode(audio, override)
+        return text
 
     def unload(self) -> None:
         self._model = None
 
-    def _decode(self, audio: np.ndarray, language: str | None, *, vad: bool = True) -> tuple[Any, Any]:
+    def _decode(self, audio: np.ndarray, language: str | None, *, vad: bool = True) -> tuple[str, Any]:
+        frames = window_frames_for(len(audio) / SAMPLE_RATE, self._cfg.adaptive_window)
+        try:
+            return self._run(audio, language, vad, frames)
+        except Exception:
+            if frames is None:
+                raise
+            log.exception("узкое окно энкодера не сработало — повторяю на полном")
+            return self._run(audio, language, vad, None)
+
+    def _run(
+        self, audio: np.ndarray, language: str | None, vad: bool, frames: int | None
+    ) -> tuple[str, Any]:
         cfg = self._cfg
-        return self._model.transcribe(
-            audio,
-            language=language,
-            beam_size=cfg.beam_size,
-            temperature=_TEMPERATURE_LADDER if cfg.temperature_fallback else 0.0,
-            condition_on_previous_text=False,
-            compression_ratio_threshold=cfg.compression_ratio_threshold,
-            log_prob_threshold=cfg.log_prob_threshold,
-            no_speech_threshold=cfg.no_speech_threshold,
-            initial_prompt=cfg.initial_prompt or None,
-            hotwords=cfg.hotwords or None,
-            vad_filter=vad and self._vad.enabled,
-            vad_parameters={
-                "threshold": self._vad.threshold,
-                "min_silence_duration_ms": self._vad.min_silence_duration_ms,
-                "speech_pad_ms": self._vad.speech_pad_ms,
-            },
-        )
+        with self._lock, encoder_window(frames):
+            segments, info = self._model.transcribe(
+                audio,
+                language=language,
+                beam_size=cfg.beam_size,
+                temperature=_TEMPERATURE_LADDER if cfg.temperature_fallback else 0.0,
+                condition_on_previous_text=False,
+                compression_ratio_threshold=cfg.compression_ratio_threshold,
+                log_prob_threshold=cfg.log_prob_threshold,
+                no_speech_threshold=cfg.no_speech_threshold,
+                initial_prompt=cfg.initial_prompt or None,
+                hotwords=cfg.hotwords or None,
+                vad_filter=vad and self._vad.enabled,
+                vad_parameters={
+                    "threshold": self._vad.threshold,
+                    "min_silence_duration_ms": self._vad.min_silence_duration_ms,
+                    "speech_pad_ms": self._vad.speech_pad_ms,
+                },
+            )
+            # Генератор ленивый: перебираем внутри окна, иначе патч уже снят.
+            text = " ".join(seg.text.strip() for seg in segments).strip()
+        return text, info

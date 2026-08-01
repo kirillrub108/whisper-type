@@ -40,3 +40,13 @@ def test_append_space() -> None:
 
 def test_filter_keeps_other_text() -> None:
     assert filter_hallucinations("abc", PATTERNS) == "abc"
+
+
+def test_orphan_punctuation_after_filter_removed() -> None:
+    text = "несколько долей секунды Продолжение следует..."
+    assert postprocess(text, PATTERNS) == "несколько долей секунды"
+
+
+def test_own_ellipsis_kept() -> None:
+    assert postprocess("подожди...", PATTERNS) == "подожди..."
+    assert postprocess("это конец.", PATTERNS) == "это конец."

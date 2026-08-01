@@ -56,3 +56,56 @@ def test_override_when_no_candidate_in_probs() -> None:
 
 def test_empty_candidates_disables_override() -> None:
     assert pick_language("de", [("de", 0.9)], []) is None
+
+
+def test_window_disabled_returns_none() -> None:
+    from whispertype.stt import window_frames_for
+
+    assert window_frames_for(5.0, False) is None
+
+
+def test_window_short_phrase_is_narrowed() -> None:
+    from whispertype.stt import WINDOW_MARGIN_SECONDS, window_frames_for
+
+    frames = window_frames_for(5.0, True)
+    assert frames == int((5.0 + WINDOW_MARGIN_SECONDS) * 100)
+
+
+def test_window_long_phrase_stays_full() -> None:
+    from whispertype.stt import window_frames_for
+
+    # 25 с + запас уже перекрывают штатные 30 с — сужать нечего
+    assert window_frames_for(25.0, True) is None
+
+
+def test_window_boundary_exactly_full() -> None:
+    from whispertype.stt import FULL_WINDOW_FRAMES, WINDOW_MARGIN_SECONDS, window_frames_for
+
+    boundary = FULL_WINDOW_FRAMES / 100 - WINDOW_MARGIN_SECONDS
+    assert window_frames_for(boundary, True) is None
+    assert window_frames_for(boundary - 1, True) == FULL_WINDOW_FRAMES - 100
+
+
+def test_encoder_window_restores_original() -> None:
+    import faster_whisper.transcribe as ftr
+
+    from whispertype.stt import encoder_window
+
+    original = ftr.pad_or_trim
+    with encoder_window(800):
+        assert ftr.pad_or_trim is not original
+    assert ftr.pad_or_trim is original
+
+
+def test_encoder_window_restores_after_error() -> None:
+    import faster_whisper.transcribe as ftr
+
+    from whispertype.stt import encoder_window
+
+    original = ftr.pad_or_trim
+    try:
+        with encoder_window(800):
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+    assert ftr.pad_or_trim is original

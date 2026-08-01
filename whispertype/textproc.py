@@ -7,6 +7,9 @@ from collections.abc import Sequence
 
 _WHITESPACE = re.compile(r"\s+")
 _PUNCT_ONLY = re.compile(r"""^[\s.,!?…\-—–:;'"«»()\[\]]*$""")
+# Осиротевшая пунктуация после вырезанной галлюцинации («…секунды ...»).
+# Пробел перед ней обязателен: своё многоточие примыкает к слову вплотную.
+_ORPHAN_TAIL = re.compile(r"\s+[.,!?…\-—–:;]+\s*$")
 
 
 def filter_hallucinations(text: str, patterns: Sequence[str]) -> str:
@@ -29,6 +32,7 @@ def postprocess(
     """Чистит текст перед вставкой. Пустая строка на выходе — вставлять нечего."""
     cleaned = filter_hallucinations(text, patterns)
     cleaned = _WHITESPACE.sub(" ", cleaned).strip()
+    cleaned = _ORPHAN_TAIL.sub("", cleaned)
     if _PUNCT_ONLY.match(cleaned):
         return ""
     if strip_final_period and cleaned.endswith(".") and not cleaned.endswith(".."):

@@ -74,6 +74,10 @@ class ModelConfig:
     log_prob_threshold: float = -1.0
     no_speech_threshold: float = 0.6
     normalize_audio: bool = True
+    # Сужать окно энкодера под длину фразы вместо неизменных 30 с (в 2–3 раза
+    # быстрее на коротких фразах). Опирается на внутренности faster-whisper,
+    # поэтому при сбое молча откатывается на полное окно.
+    adaptive_window: bool = True
 
 
 @dataclass
@@ -160,6 +164,7 @@ _FIELD_TYPES: dict[str, tuple[type, ...]] = {
     "log_prob_threshold": (int, float),
     "no_speech_threshold": (int, float),
     "normalize_audio": (bool,),
+    "adaptive_window": (bool,),
     "enabled": (bool,),
     "threshold": (int, float),
     "min_silence_duration_ms": (int,),

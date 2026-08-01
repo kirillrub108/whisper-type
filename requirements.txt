@@ -1,4 +1,6 @@
-faster-whisper>=1.0.3
+# Верхняя граница не случайна: adaptive_window подменяет pad_or_trim —
+# внутреннюю функцию библиотеки, а не часть публичного API.
+faster-whisper>=1.2,<2
 sounddevice>=0.4.6
 numpy>=1.26,<3
 pystray>=0.19.5

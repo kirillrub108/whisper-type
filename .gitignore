@@ -1,0 +1,43 @@
+# Виртуальные окружения
+.venv/
+venv/
+env/
+
+# Байт-код Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Сборка PyInstaller (whispertype.spec — рукописный, коммитится)
+build/
+dist/
+*.manifest
+
+# Кэши инструментов
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Пакетирование
+*.egg-info/
+.eggs/
+
+# Логи и локальные данные приложения
+*.log
+logs/
+models/
+
+# Claude Code: локальные настройки (общий settings.json — коммитится)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+
+# Windows
+Thumbs.db
+desktop.ini

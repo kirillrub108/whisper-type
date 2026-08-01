@@ -90,6 +90,18 @@ class OverlayConfig:
 
 
 @dataclass
+class StreamingConfig:
+    """Обработка длинной диктовки кусками прямо во время записи.
+
+    Смысла ускорять короткие фразы нет: они и так укладываются в одно окно
+    энкодера, поэтому куски режутся только начиная с chunk_seconds.
+    """
+
+    enabled: bool = True
+    chunk_seconds: int = 25
+
+
+@dataclass
 class AudioConfig:
     input_device: int | str | None = None
     max_record_seconds: int = 120
@@ -120,6 +132,7 @@ class Config:
     model: ModelConfig = field(default_factory=ModelConfig)
     vad: VadConfig = field(default_factory=VadConfig)
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
+    streaming: StreamingConfig = field(default_factory=StreamingConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
     inject: InjectConfig = field(default_factory=InjectConfig)
@@ -151,6 +164,7 @@ _FIELD_TYPES: dict[str, tuple[type, ...]] = {
     "threshold": (int, float),
     "min_silence_duration_ms": (int,),
     "speech_pad_ms": (int,),
+    "chunk_seconds": (int,),
     "input_device": (int, str, type(None)),
     "max_record_seconds": (int,),
     "min_record_ms": (int,),
@@ -214,6 +228,12 @@ def _validate(cfg: Config, warnings: list[str]) -> None:
         cfg.vad.speech_pad_ms = 400
     if cfg.vad.min_silence_duration_ms < 0:
         cfg.vad.min_silence_duration_ms = 2000
+    # Больше 29 с бессмысленно: кусок перестанет помещаться в окно энкодера.
+    if not 5 <= cfg.streaming.chunk_seconds <= 29:
+        warnings.append(
+            f"streaming.chunk_seconds: {cfg.streaming.chunk_seconds} вне диапазона 5–29, использовано 25"
+        )
+        cfg.streaming.chunk_seconds = 25
     if cfg.model.cpu_threads < 1:
         warnings.append("model.cpu_threads: значение < 1, использовано 6")
         cfg.model.cpu_threads = 6

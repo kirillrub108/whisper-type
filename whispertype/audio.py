@@ -20,6 +20,39 @@ log = logging.getLogger(__name__)
 SAMPLE_RATE = 16000
 
 
+SEARCH_BACK_SECONDS = 6.0
+SILENCE_RMS = 0.02
+
+
+def find_cut_point(
+    audio: np.ndarray,
+    target_samples: int,
+    max_samples: int,
+    silence_rms: float = SILENCE_RMS,
+    frame_ms: int = 100,
+) -> int:
+    """Индекс среза записи на куски: самая тихая точка ближе к концу окна.
+
+    Ищем паузу с оглядкой назад, а не среди самых свежих данных: иначе срез
+    попадает в середину слова, и оно задваивается на стыке кусков. Пока паузы
+    нет и есть запас до max_samples, возвращаем len(audio) — режем позже.
+    """
+    if len(audio) < target_samples:
+        return len(audio)
+    frame = max(1, frame_ms * SAMPLE_RATE // 1000)
+    search_start = max(0, target_samples - int(SEARCH_BACK_SECONDS * SAMPLE_RATE))
+    region = audio[search_start:]
+    n_frames = len(region) // frame
+    if n_frames == 0:
+        return len(audio)
+    frames = region[: n_frames * frame].reshape(n_frames, frame)
+    rms = np.sqrt(np.mean(frames.astype(np.float64) ** 2, axis=1))
+    quietest = int(np.argmin(rms))
+    if rms[quietest] > silence_rms and len(audio) < max_samples:
+        return len(audio)  # подходящей паузы нет — копим дальше
+    return search_start + quietest * frame + frame // 2
+
+
 def list_input_devices() -> list[str]:
     names: list[str] = []
     try:
@@ -81,6 +114,23 @@ class AudioRecorder:
         if not chunks:
             return np.zeros(0, dtype=np.float32)
         return np.concatenate([c.reshape(-1) for c in chunks]).astype(np.float32, copy=False)
+
+    def pending_samples(self) -> int:
+        with self._lock:
+            return sum(len(c) for c in self._chunks)
+
+    def cut_prefix(self, target_samples: int, max_samples: int) -> np.ndarray:
+        """Отрезает начало буфера по тихой точке. Пустой массив — резать ещё рано."""
+        with self._lock:
+            if not self._chunks:
+                return np.zeros(0, dtype=np.float32)
+            buffered = np.concatenate([c.reshape(-1) for c in self._chunks])
+            cut = find_cut_point(buffered, target_samples, max_samples)
+            if cut >= len(buffered):
+                self._chunks = [buffered]
+                return np.zeros(0, dtype=np.float32)
+            self._chunks = [buffered[cut:]]
+            return buffered[:cut].astype(np.float32, copy=False)
 
     def cancel(self) -> None:
         with self._lock:

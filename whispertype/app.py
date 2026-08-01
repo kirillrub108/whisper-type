@@ -63,6 +63,9 @@ class App:
         self.overlay = Overlay() if cfg.overlay.enabled else None
         self.tray = Tray(self)
         self._worker: threading.Thread | None = None
+        self._stream_thread: threading.Thread | None = None
+        self._stream_stop = threading.Event()
+        self._stream_parts: list[str] = []
 
     @staticmethod
     def _parse_or_default(spec: str, default: str) -> Hotkey:
@@ -179,8 +182,51 @@ class App:
         self.tray.set_state("recording")
         self._overlay_show("recording")
         self.sounds.record_start()
+        self._stream_parts = []
+        if self.cfg.streaming.enabled:
+            self._stream_stop.clear()
+            self._stream_thread = threading.Thread(
+                target=self._stream_loop, name="stream", daemon=True
+            )
+            self._stream_thread.start()
+
+    def _stream_loop(self) -> None:
+        """Пока идёт запись, дораспознаёт накопленное кусками.
+
+        К моменту отпускания хоткея остаётся только хвост, поэтому ожидание
+        не растёт вместе с длиной диктовки.
+        """
+        target = self.cfg.streaming.chunk_seconds * SAMPLE_RATE
+        # 29 с — предел одного окна энкодера, дальше кусок обойдётся вдвое дороже.
+        hard_max = 29 * SAMPLE_RATE
+        while not self._stream_stop.wait(0.25):
+            if self.recorder.pending_samples() < target:
+                continue
+            chunk = self.recorder.cut_prefix(target, hard_max)
+            if chunk.size == 0:
+                continue
+            try:
+                raw = self.transcriber.transcribe(chunk)
+            except Exception:
+                log.exception("не удалось распознать промежуточный кусок")
+                continue
+            # Фильтруем каждый кусок отдельно: обрывок на стыке легко порождает
+            # галлюцинацию, а в общей склейке её уже не отличить от речи.
+            text = postprocess(raw, self.cfg.hallucination_patterns)
+            log.info("промежуточный кусок %.1f с: %r", chunk.size / SAMPLE_RATE, text[:60])
+            if text:
+                self._stream_parts.append(text)
+
+    def _stop_stream(self) -> None:
+        self._stream_stop.set()
+        thread = self._stream_thread
+        self._stream_thread = None
+        if thread is not None:
+            thread.join(timeout=60.0)  # ждём текущий кусок, иначе потеряем его текст
 
     def _cancel(self) -> None:
+        self._stop_stream()
+        self._stream_parts = []
         self.recorder.cancel()
         self.listener.set_recording(False)
         self.state = "idle"
@@ -190,7 +236,10 @@ class App:
 
     def _finish(self) -> None:
         self.listener.set_recording(False)
+        self._stop_stream()
         audio = self.recorder.end()
+        parts = self._stream_parts
+        self._stream_parts = []
         self.state = "processing"
         self.tray.set_state("processing")
         self._overlay_show("processing")
@@ -198,14 +247,18 @@ class App:
         try:
             duration_ms = len(audio) / SAMPLE_RATE * 1000
             if duration_ms < self.cfg.audio.min_record_ms:
-                log.info("запись слишком короткая (%.0f мс) — игнорирую", duration_ms)
-                return
-            started = time.perf_counter()
-            raw = self.transcriber.transcribe(audio)
-            log.info(
-                "распознано %.1f с аудио за %.2f с: %r",
-                duration_ms / 1000, time.perf_counter() - started, raw[:120],
-            )
+                if not parts:
+                    log.info("запись слишком короткая (%.0f мс) — игнорирую", duration_ms)
+                    return
+                tail = ""  # хвост после последнего куска — обрывок, распознавать нечего
+            else:
+                started = time.perf_counter()
+                tail = self.transcriber.transcribe(audio)
+                log.info(
+                    "распознано %.1f с аудио за %.2f с: %r",
+                    duration_ms / 1000, time.perf_counter() - started, tail[:120],
+                )
+            raw = " ".join(part for part in (*parts, tail) if part)
             text = postprocess(
                 raw,
                 self.cfg.hallucination_patterns,

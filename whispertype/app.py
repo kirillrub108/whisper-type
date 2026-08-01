@@ -25,6 +25,7 @@ from .config import (
 from .hotkey import HotkeyListener
 from .keys import Hotkey, parse_hotkey
 from .logging_setup import setup_logging
+from .overlay import Overlay
 from .sounds import Sounds
 from .stt import Transcriber
 from .textproc import postprocess
@@ -54,11 +55,12 @@ class App:
             cfg.audio.max_record_seconds,
             lambda: self._events.put("limit"),
         )
-        self.transcriber = Transcriber(cfg.model, models_dir())
+        self.transcriber = Transcriber(cfg.model, cfg.vad, models_dir())
         hotkey = self._parse_or_default(cfg.hotkey.combo, _DEFAULT_COMBO)
         cancel = self._parse_or_default(cfg.hotkey.cancel, _DEFAULT_CANCEL)
         self._hotkey_vks = hotkey.all_vks()
         self.listener = HotkeyListener(hotkey, cancel, self._events.put)
+        self.overlay = Overlay() if cfg.overlay.enabled else None
         self.tray = Tray(self)
         self._worker: threading.Thread | None = None
 
@@ -92,6 +94,8 @@ class App:
         self._worker = threading.Thread(target=self._worker_loop, name="worker", daemon=True)
         self._worker.start()
         self.listener.start()
+        if self.overlay is not None:
+            self.overlay.start()
         if not self.transcriber.is_cached():
             self.tray.notify(
                 "Первый запуск: скачиваю модель распознавания (~1.6 ГБ). "
@@ -109,6 +113,8 @@ class App:
         self._shutdown.set()
         log.info("завершение работы")
         self.listener.stop()
+        if self.overlay is not None:
+            self.overlay.stop()
         self.recorder.close()
         self.transcriber.unload()
 
@@ -131,6 +137,7 @@ class App:
                 self.state = "idle"
                 self.listener.set_recording(False)
                 self.tray.set_state("error")
+                self._overlay_hide()
                 self.sounds.error()
 
     def _handle(self, event: str) -> None:
@@ -170,6 +177,7 @@ class App:
         self.state = "recording"
         self.listener.set_recording(True)
         self.tray.set_state("recording")
+        self._overlay_show("recording")
         self.sounds.record_start()
 
     def _cancel(self) -> None:
@@ -177,6 +185,7 @@ class App:
         self.listener.set_recording(False)
         self.state = "idle"
         self.tray.set_state("idle")
+        self._overlay_hide()
         log.info("запись отменена")
 
     def _finish(self) -> None:
@@ -184,6 +193,7 @@ class App:
         audio = self.recorder.end()
         self.state = "processing"
         self.tray.set_state("processing")
+        self._overlay_show("processing")
         self.sounds.record_stop()
         try:
             duration_ms = len(audio) / SAMPLE_RATE * 1000
@@ -209,6 +219,15 @@ class App:
         finally:
             self.state = "idle"
             self.tray.set_state("idle")
+            self._overlay_hide()
+
+    def _overlay_show(self, state: str) -> None:
+        if self.overlay is not None:
+            self.overlay.show(state)
+
+    def _overlay_hide(self) -> None:
+        if self.overlay is not None:
+            self.overlay.hide()
 
     def _inject(self, text: str) -> None:
         inject.wait_keys_released(self._hotkey_vks)

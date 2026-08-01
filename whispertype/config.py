@@ -60,11 +60,33 @@ DEFAULT_HALLUCINATION_PATTERNS: tuple[str, ...] = (
 @dataclass
 class ModelConfig:
     repo: str = "deepdml/faster-whisper-large-v3-turbo-ct2"
-    compute_type: str = "int8"
+    compute_type: str = "int8_float32"
     cpu_threads: int = 6
-    beam_size: int = 1
-    language: str | None = None
+    beam_size: int = 5
+    # Заданный язык экономит отдельный проход энкодера на автоопределении (вдвое быстрее).
+    # null — определять автоматически по списку languages, но платить этим проходом.
+    language: str | None = "ru"
+    languages: list[str] = field(default_factory=lambda: ["ru", "en"])  # кандидаты при авто
+    initial_prompt: str | None = None
+    hotwords: str | None = None
+    temperature_fallback: bool = True
+    compression_ratio_threshold: float = 2.4
+    log_prob_threshold: float = -1.0
     no_speech_threshold: float = 0.6
+    normalize_audio: bool = True
+
+
+@dataclass
+class VadConfig:
+    enabled: bool = True
+    threshold: float = 0.35
+    min_silence_duration_ms: int = 2000
+    speech_pad_ms: int = 400
+
+
+@dataclass
+class OverlayConfig:
+    enabled: bool = True
 
 
 @dataclass
@@ -96,6 +118,8 @@ class Config:
     log_level: str = "INFO"
     sounds: bool = True
     model: ModelConfig = field(default_factory=ModelConfig)
+    vad: VadConfig = field(default_factory=VadConfig)
+    overlay: OverlayConfig = field(default_factory=OverlayConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
     inject: InjectConfig = field(default_factory=InjectConfig)
@@ -115,7 +139,18 @@ _FIELD_TYPES: dict[str, tuple[type, ...]] = {
     "cpu_threads": (int,),
     "beam_size": (int,),
     "language": (str, type(None)),
+    "languages": (list,),
+    "initial_prompt": (str, type(None)),
+    "hotwords": (str, type(None)),
+    "temperature_fallback": (bool,),
+    "compression_ratio_threshold": (int, float),
+    "log_prob_threshold": (int, float),
     "no_speech_threshold": (int, float),
+    "normalize_audio": (bool,),
+    "enabled": (bool,),
+    "threshold": (int, float),
+    "min_silence_duration_ms": (int,),
+    "speech_pad_ms": (int,),
     "input_device": (int, str, type(None)),
     "max_record_seconds": (int,),
     "min_record_ms": (int,),
@@ -166,8 +201,19 @@ def _validate(cfg: Config, warnings: list[str]) -> None:
         warnings.append(f"inject.method: неизвестный метод {cfg.inject.method!r}, использован clipboard")
         cfg.inject.method = "clipboard"
     if not 1 <= cfg.model.beam_size <= 5:
-        warnings.append(f"model.beam_size: {cfg.model.beam_size} вне диапазона 1–5, использован 1")
-        cfg.model.beam_size = 1
+        warnings.append(f"model.beam_size: {cfg.model.beam_size} вне диапазона 1–5, использован 5")
+        cfg.model.beam_size = 5
+    langs = [lang for lang in cfg.model.languages if isinstance(lang, str) and lang]
+    if len(langs) != len(cfg.model.languages):
+        warnings.append("model.languages: нестроковые элементы отброшены")
+    cfg.model.languages = langs
+    if not 0.0 <= cfg.vad.threshold <= 1.0:
+        warnings.append(f"vad.threshold: {cfg.vad.threshold} вне диапазона 0–1, использовано 0.35")
+        cfg.vad.threshold = 0.35
+    if cfg.vad.speech_pad_ms < 0:
+        cfg.vad.speech_pad_ms = 400
+    if cfg.vad.min_silence_duration_ms < 0:
+        cfg.vad.min_silence_duration_ms = 2000
     if cfg.model.cpu_threads < 1:
         warnings.append("model.cpu_threads: значение < 1, использовано 6")
         cfg.model.cpu_threads = 6

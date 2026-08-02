@@ -115,7 +115,7 @@ class AudioConfig:
 @dataclass
 class HotkeyConfig:
     mode: str = "push_to_talk"  # push_to_talk | toggle
-    combo: str = "right ctrl"
+    combo: str = "ctrl + space"
     cancel: str = "esc"
 
 

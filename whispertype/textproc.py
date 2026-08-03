@@ -51,6 +51,18 @@ def collapse_duplicated(text: str) -> str:
     return cleaned[: len(cleaned) // parts].strip()
 
 
+def menu_label(text: str, limit: int = 45) -> str:
+    """Однострочная подпись пункта меню трея.
+
+    Амперсанд удваивается: Win32 считает его префиксом акселератора и съедает,
+    показывая следующую букву подчёркнутой (pystray текст не экранирует).
+    """
+    collapsed = _WHITESPACE.sub(" ", text).strip()
+    if len(collapsed) > limit:
+        collapsed = collapsed[: limit - 1].rstrip() + "…"
+    return collapsed.replace("&", "&&")
+
+
 def filter_hallucinations(text: str, patterns: Sequence[str]) -> str:
     """Удаляет вхождения паттернов-галлюцинаций (регистронезависимо, как подстроки)."""
     result = text

@@ -13,6 +13,7 @@ from pystray import Menu, MenuItem
 
 from . import __version__
 from .config import APP_NAME, config_path, logs_dir
+from .textproc import menu_label
 
 if TYPE_CHECKING:
     from .app import App
@@ -83,6 +84,8 @@ class Tray:
         return Menu(
             MenuItem(f"{APP_NAME} {__version__}", None, enabled=False),
             Menu.SEPARATOR,
+            MenuItem("Последние фразы", Menu(self._history_items)),
+            Menu.SEPARATOR,
             MenuItem(
                 "Включено",
                 lambda icon, item: app.toggle_enabled(),
@@ -118,6 +121,19 @@ class Tray:
             MenuItem("О программе", lambda icon, item: app.show_about()),
             MenuItem("Выход", lambda icon, item: app.quit()),
         )
+
+    def _history_items(self):  # noqa: ANN202 — генератор пунктов для pystray
+        app = self._app
+
+        def insert(phrase: str) -> Callable[[pystray.Icon, MenuItem], None]:
+            return lambda icon, item: app.insert_phrase(phrase)
+
+        phrases = app.recent_phrases
+        if not phrases:
+            yield MenuItem("пока пусто", None, enabled=False)
+            return
+        for phrase in phrases:
+            yield MenuItem(menu_label(phrase), insert(phrase))
 
     def _device_items(self):  # noqa: ANN202 — генератор пунктов для pystray
         from .audio import list_input_devices

@@ -335,6 +335,94 @@ def _process_integrity(process_handle: int) -> int | None:
         _kernel32.CloseHandle(token)
 
 
+# ---------------------------------------------------------------- фокус окна
+
+SW_RESTORE = 9
+
+_user32.SetForegroundWindow.restype = wintypes.BOOL
+_user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+_user32.IsWindow.restype = wintypes.BOOL
+_user32.IsWindow.argtypes = (wintypes.HWND,)
+_user32.IsIconic.restype = wintypes.BOOL
+_user32.IsIconic.argtypes = (wintypes.HWND,)
+_user32.ShowWindow.restype = wintypes.BOOL
+_user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+_kernel32.GetCurrentProcessId.restype = wintypes.DWORD
+
+
+_user32.GetClassNameW.restype = ctypes.c_int
+_user32.GetClassNameW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+
+# Поверхности оболочки Windows: панель задач, флайаут скрытых значков, меню
+# «Пуск», рабочий стол. Любая из них успевает побыть активным окном, пока
+# пользователь целится в значок в трее, но вставлять текст в них бессмысленно.
+_SHELL_WINDOW_CLASSES = frozenset(
+    {
+        "Shell_TrayWnd",
+        "Shell_SecondaryTrayWnd",
+        "NotifyIconOverflowWindow",
+        "TopLevelWindowForOverflowXamlIsland",
+        "XamlExplorerHostIslandWindow",
+        "Windows.UI.Core.CoreWindow",
+        "Progman",
+        "WorkerW",
+    }
+)
+
+
+def foreground_window() -> int:
+    return _user32.GetForegroundWindow() or 0
+
+
+def window_class(hwnd: int) -> str:
+    buf = ctypes.create_unicode_buffer(256)
+    length = _user32.GetClassNameW(hwnd, buf, len(buf))
+    return buf.value if length else ""
+
+
+def is_shell_window(hwnd: int) -> bool:
+    """Окно принадлежит оболочке (панель задач, «Пуск», рабочий стол)."""
+    return window_class(hwnd) in _SHELL_WINDOW_CLASSES
+
+
+def is_own_window(hwnd: int) -> bool:
+    """Принадлежит ли окно нашему процессу (меню трея — как раз такое)."""
+    if not hwnd:
+        return False
+    pid = wintypes.DWORD(0)
+    _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value == _kernel32.GetCurrentProcessId()
+
+
+def _became_foreground(hwnd: int, timeout: float) -> bool:
+    # SetForegroundWindow асинхронен и вправе тихо отказать, поэтому проверяем
+    # опросом, а не по возвращённому значению.
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if foreground_window() == hwnd:
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def focus_window(hwnd: int, timeout: float = 0.5) -> bool:
+    """Возвращает фокус окну и ждёт, пока оно реально станет активным.
+
+    Вызывать только из процесса, который сам активен: иначе система молча
+    откажет. Для меню трея это условие выполнено — pystray делает своё окно
+    активным перед показом меню и обратно фокус не отдаёт.
+    """
+    if not hwnd or not _user32.IsWindow(hwnd):
+        return False
+    if _user32.IsIconic(hwnd):
+        _user32.ShowWindow(hwnd, SW_RESTORE)
+    _user32.SetForegroundWindow(hwnd)
+    if _became_foreground(hwnd, timeout):
+        return True
+    log.warning("окно %d не стало активным за %.1f с", hwnd, timeout)
+    return False
+
+
 def foreground_blocks_input() -> bool:
     """True — окно в фокусе принадлежит процессу с более высоким integrity level:
     UIPI молча отбросит наш SendInput."""

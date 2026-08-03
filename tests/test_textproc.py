@@ -88,6 +88,33 @@ def test_collapse_duplicated_three_parts() -> None:
     assert collapse_duplicated(text) == "Привет, это проверка."
 
 
+def test_menu_label_keeps_short_text() -> None:
+    from whispertype.textproc import menu_label
+
+    assert menu_label("Привет, это проверка") == "Привет, это проверка"
+
+
+def test_menu_label_truncates_long_text() -> None:
+    from whispertype.textproc import menu_label
+
+    label = menu_label("а" * 100, limit=10)
+    assert label == "а" * 9 + "…"
+    assert len(label) == 10
+
+
+def test_menu_label_escapes_ampersand() -> None:
+    # Win32 съедает одиночный & и подчёркивает следующую букву
+    from whispertype.textproc import menu_label
+
+    assert menu_label("Tom & Jerry") == "Tom && Jerry"
+
+
+def test_menu_label_collapses_whitespace() -> None:
+    from whispertype.textproc import menu_label
+
+    assert menu_label("две\n\nстроки  тут") == "две строки тут"
+
+
 def test_collapse_keeps_normal_text() -> None:
     from whispertype.textproc import collapse_duplicated
 

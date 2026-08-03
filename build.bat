@@ -1,6 +1,21 @@
 @echo off
+rem UTF-8 в консоли: сообщения ниже написаны кириллицей, а файл сохранён в UTF-8.
+chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+
+where py >nul 2>nul
+if errorlevel 1 (
+    echo Не найден лаунчер "py". Установите Python 3.11 с python.org
+    echo и отметьте галочку "Add Python to PATH".
+    goto :error
+)
+py -3.11 --version >nul 2>nul
+if errorlevel 1 (
+    echo Не найден Python 3.11. Установите его с python.org — версии новее
+    echo пока не поддерживаются PyInstaller в этой сборке.
+    goto :error
+)
 
 rem Существующее окружение проверяем, а не используем вслепую: PyInstaller не
 rem умеет собирать из Python, установленного из Microsoft Store, а venv на

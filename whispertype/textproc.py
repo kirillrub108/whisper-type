@@ -13,25 +13,42 @@ _PUNCT_ONLY = re.compile(r"""^[\s.,!?…\-—–:;'"«»()\[\]]*$""")
 _ORPHAN_TAIL = re.compile(r"\s+[.,!?…\-—–:;]+\s*$")
 
 
-def looks_duplicated(text: str) -> bool:
-    """Повторяет ли расшифровка сама себя целиком.
-
-    Узкое окно энкодера иногда заставляет модель добивать текст повторами
-    одной и той же фразы. Ложное срабатывание безобидно — оно лишь вызовет
-    повторное распознавание на полном окне.
-    """
-    cleaned = _WHITESPACE.sub(" ", text).strip()
+def _duplicate_parts(cleaned: str) -> int | None:
+    """На сколько почти одинаковых частей делится текст (2/3), None — не делится."""
     if len(cleaned) < 24:
-        return False
-    for parts in (2, 3):
+        return None
+    for parts in (3, 2):
         size = len(cleaned) // parts
         if size < 12:
             continue
         head = cleaned[:size]
         rest = (cleaned[i * size : (i + 1) * size] for i in range(1, parts))
         if all(SequenceMatcher(None, head, chunk).ratio() > 0.9 for chunk in rest):
-            return True
-    return False
+            return parts
+    return None
+
+
+def looks_duplicated(text: str) -> bool:
+    """Повторяет ли расшифровка сама себя целиком.
+
+    Узкое окно энкодера иногда заставляет модель добивать текст повторами
+    одной и той же фразы.
+    """
+    return _duplicate_parts(_WHITESPACE.sub(" ", text).strip()) is not None
+
+
+def collapse_duplicated(text: str) -> str:
+    """Схлопывает самоповтор до одного экземпляра фразы.
+
+    Дешёвая замена повторному распознаванию на полном окне (оно стоит секунды).
+    Цена — редкий случай, когда пользователь действительно дважды произнёс
+    одно и то же длинное предложение, тоже схлопнется.
+    """
+    cleaned = _WHITESPACE.sub(" ", text).strip()
+    parts = _duplicate_parts(cleaned)
+    if parts is None:
+        return text
+    return cleaned[: len(cleaned) // parts].strip()
 
 
 def filter_hallucinations(text: str, patterns: Sequence[str]) -> str:

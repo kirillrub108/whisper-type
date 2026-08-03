@@ -71,3 +71,25 @@ def test_short_text_never_flagged() -> None:
 
     assert not looks_duplicated("да да")
     assert not looks_duplicated("")
+
+
+def test_collapse_duplicated_two_parts() -> None:
+    from whispertype.textproc import collapse_duplicated
+
+    assert collapse_duplicated("Привет, это проверка. Привет, это проверка.") == (
+        "Привет, это проверка."
+    )
+
+
+def test_collapse_duplicated_three_parts() -> None:
+    from whispertype.textproc import collapse_duplicated
+
+    text = "Привет, это проверка. Привет, это проверка. Привет, это проверка."
+    assert collapse_duplicated(text) == "Привет, это проверка."
+
+
+def test_collapse_keeps_normal_text() -> None:
+    from whispertype.textproc import collapse_duplicated
+
+    text = "Привет, это проверка распознавания речи на русском языке"
+    assert collapse_duplicated(text) == text

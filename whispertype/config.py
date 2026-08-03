@@ -74,9 +74,10 @@ class ModelConfig:
     log_prob_threshold: float = -1.0
     no_speech_threshold: float = 0.6
     normalize_audio: bool = True
-    # Сужать окно энкодера под длину фразы вместо неизменных 30 с (в 2–3 раза
-    # быстрее на коротких фразах). Опирается на внутренности faster-whisper,
-    # поэтому при сбое молча откатывается на полное окно.
+    # Сужение окна энкодера под длину фразы — главное ускорение на CPU (turbo:
+    # ~1 с вместо ~4 с на короткой записи). Работает в связке с without_timestamps
+    # и нижним порогом окна 12 с (см. stt.py); редкий остаточный самоповтор
+    # схлопывается текстом (collapse_duplicated) без повторного распознавания.
     adaptive_window: bool = True
 
 
@@ -275,7 +276,9 @@ def load_config(path: Path | None = None) -> tuple[Config, list[str]]:
         write_config(cfg, path)
         return cfg, warnings
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        # utf-8-sig, а не utf-8: Блокнот и PowerShell сохраняют файл с BOM,
+        # на которой json падает — и весь конфиг молча заменяется дефолтами.
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as exc:
         warnings.append(f"не удалось прочитать {path.name}: {exc}; использованы дефолты")
         return cfg, warnings

@@ -82,3 +82,16 @@ def test_bad_hallucination_items_dropped(tmp_path: Path) -> None:
     cfg, warnings = load_config(path)
     assert cfg.hallucination_patterns == ["ok"]
     assert len(warnings) == 1
+
+
+def test_config_with_utf8_bom_is_read(tmp_path: Path) -> None:
+    # Блокнот Windows и PowerShell сохраняют UTF-8 с BOM
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({"model": {"cpu_threads": 8}, "hotkey": {"combo": "f9"}}),
+        encoding="utf-8-sig",
+    )
+    cfg, warnings = load_config(path)
+    assert warnings == []
+    assert cfg.model.cpu_threads == 8
+    assert cfg.hotkey.combo == "f9"

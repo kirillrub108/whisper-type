@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from .config import ModelConfig, VadConfig
-from .textproc import looks_duplicated
+from .textproc import collapse_duplicated, looks_duplicated
 
 log = logging.getLogger(__name__)
 
@@ -25,12 +25,13 @@ _TEMPERATURE_LADDER = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
 
 FRAMES_PER_SECOND = 100  # шаг мел-спектрограммы: 160 сэмплов при 16 кГц
 FULL_WINDOW_FRAMES = 3000  # штатное окно Whisper — 30 с
-# Запас над длиной фразы. Проверено на длинах 2–20 с С включённой normalize_audio
-# (реальный пайплайн): запас 4-6 с при усиленной громкости иногда даёт "перелив" —
-# модель придумывает таймкоды за пределами записи и дублирует текст, причём
-# нестабильно от прогона к прогону (int8 не полностью детерминирован). Запас 8 с
-# ни разу не сломался. looks_duplicated — вторая линия защиты, не первая.
-WINDOW_MARGIN_SECONDS = 8
+# Запас над длиной фразы и нижний порог окна. Узкое окно работает только в паре
+# с without_timestamps: с таймкодами модель «переливает» их за пределы записи
+# (дубли, повторные проходы по 6–17 с). Без таймкодов запас 4 с чист на записях
+# от 7 с, но окна короче ~8 с зацикливают одиночное слово («Привет.» ×3–10),
+# поэтому окно снизу ограничено 12 с — для короткой фразы это всё равно ~1 с.
+WINDOW_MARGIN_SECONDS = 4
+MIN_WINDOW_FRAMES = 1200
 
 
 def window_frames_for(duration_seconds: float, enabled: bool) -> int | None:
@@ -38,6 +39,7 @@ def window_frames_for(duration_seconds: float, enabled: bool) -> int | None:
     if not enabled:
         return None
     frames = int((duration_seconds + WINDOW_MARGIN_SECONDS) * FRAMES_PER_SECOND)
+    frames = max(frames, MIN_WINDOW_FRAMES)
     if frames >= FULL_WINDOW_FRAMES:
         return None  # окно и так полное — сужать нечего
     return frames
@@ -178,8 +180,11 @@ class Transcriber:
             log.exception("узкое окно энкодера не сработало — повторяю на полном")
             return self._run(audio, language, vad, None)
         if frames is not None and looks_duplicated(text):
-            log.warning("узкое окно дало повтор текста — переспрашиваю на полном окне")
-            return self._run(audio, language, vad, None)
+            # Схлопываем текстом, а не переспрашиваем на полном окне: повторное
+            # распознавание стоило секунды и давало всплески до 7 с на тихой речи.
+            collapsed = collapse_duplicated(text)
+            log.warning("узкое окно дало повтор — схлопнул до %r", collapsed[:60])
+            return collapsed, info
         return text, info
 
     def _run(
@@ -198,6 +203,11 @@ class Transcriber:
                 no_speech_threshold=cfg.no_speech_threshold,
                 initial_prompt=cfg.initial_prompt or None,
                 hotwords=cfg.hotwords or None,
+                # Таймкоды не нужны (склеиваем только текст), а на узком окне они
+                # вредны: модель придумывает время за пределами записи и дублирует
+                # текст. На полном окне (frames is None) аудио может быть длиннее
+                # 30 с — там таймкоды нужны для перехода между окнами.
+                without_timestamps=frames is not None,
                 vad_filter=vad and self._vad.enabled,
                 vad_parameters={
                     "threshold": self._vad.threshold,

@@ -67,15 +67,23 @@ def test_window_disabled_returns_none() -> None:
 def test_window_short_phrase_is_narrowed() -> None:
     from whispertype.stt import WINDOW_MARGIN_SECONDS, window_frames_for
 
-    frames = window_frames_for(5.0, True)
-    assert frames == int((5.0 + WINDOW_MARGIN_SECONDS) * 100)
+    frames = window_frames_for(10.0, True)
+    assert frames == int((10.0 + WINDOW_MARGIN_SECONDS) * 100)
+
+
+def test_window_floor_for_tiny_recordings() -> None:
+    from whispertype.stt import MIN_WINDOW_FRAMES, window_frames_for
+
+    # Окно короче ~8 с зацикливает одиночное слово, поэтому снизу — порог
+    assert window_frames_for(2.0, True) == MIN_WINDOW_FRAMES
+    assert window_frames_for(0.5, True) == MIN_WINDOW_FRAMES
 
 
 def test_window_long_phrase_stays_full() -> None:
     from whispertype.stt import window_frames_for
 
     # длина + запас уже перекрывают штатные 30 с — сужать нечего
-    assert window_frames_for(25.0, True) is None
+    assert window_frames_for(27.0, True) is None
 
 
 def test_window_boundary_exactly_full() -> None:

@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from .config import ModelConfig, VadConfig
+from .textproc import looks_duplicated
 
 log = logging.getLogger(__name__)
 
@@ -24,8 +25,11 @@ _TEMPERATURE_LADDER = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
 
 FRAMES_PER_SECOND = 100  # шаг мел-спектрограммы: 160 сэмплов при 16 кГц
 FULL_WINDOW_FRAMES = 3000  # штатное окно Whisper — 30 с
-# Запас над длиной фразы. При меньшем модель принимает набивку за речь
-# и дописывает повторы; 8 с проверены на длинах 3–20 с.
+# Запас над длиной фразы. Проверено на длинах 2–20 с С включённой normalize_audio
+# (реальный пайплайн): запас 4-6 с при усиленной громкости иногда даёт "перелив" —
+# модель придумывает таймкоды за пределами записи и дублирует текст, причём
+# нестабильно от прогона к прогону (int8 не полностью детерминирован). Запас 8 с
+# ни разу не сломался. looks_duplicated — вторая линия защиты, не первая.
 WINDOW_MARGIN_SECONDS = 8
 
 
@@ -167,12 +171,16 @@ class Transcriber:
     def _decode(self, audio: np.ndarray, language: str | None, *, vad: bool = True) -> tuple[str, Any]:
         frames = window_frames_for(len(audio) / SAMPLE_RATE, self._cfg.adaptive_window)
         try:
-            return self._run(audio, language, vad, frames)
+            text, info = self._run(audio, language, vad, frames)
         except Exception:
             if frames is None:
                 raise
             log.exception("узкое окно энкодера не сработало — повторяю на полном")
             return self._run(audio, language, vad, None)
+        if frames is not None and looks_duplicated(text):
+            log.warning("узкое окно дало повтор текста — переспрашиваю на полном окне")
+            return self._run(audio, language, vad, None)
+        return text, info
 
     def _run(
         self, audio: np.ndarray, language: str | None, vad: bool, frames: int | None

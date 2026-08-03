@@ -74,7 +74,7 @@ def test_window_short_phrase_is_narrowed() -> None:
 def test_window_long_phrase_stays_full() -> None:
     from whispertype.stt import window_frames_for
 
-    # 25 с + запас уже перекрывают штатные 30 с — сужать нечего
+    # длина + запас уже перекрывают штатные 30 с — сужать нечего
     assert window_frames_for(25.0, True) is None
 
 

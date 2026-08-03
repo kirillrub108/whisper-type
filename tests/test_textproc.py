@@ -50,3 +50,24 @@ def test_orphan_punctuation_after_filter_removed() -> None:
 def test_own_ellipsis_kept() -> None:
     assert postprocess("подожди...", PATTERNS) == "подожди..."
     assert postprocess("это конец.", PATTERNS) == "это конец."
+
+
+def test_duplicated_text_detected() -> None:
+    from whispertype.textproc import looks_duplicated
+
+    assert looks_duplicated("Привет, это проверка. Привет, это проверка.")
+    assert looks_duplicated("Привет, это проверка! Привет, это проверка. Привет, это проверка.")
+
+
+def test_normal_text_not_flagged() -> None:
+    from whispertype.textproc import looks_duplicated
+
+    assert not looks_duplicated("Привет, это проверка распознавания речи на русском языке")
+    assert not looks_duplicated("Надо поучаствовать в хакатоне, а потом сделать доклад")
+
+
+def test_short_text_never_flagged() -> None:
+    from whispertype.textproc import looks_duplicated
+
+    assert not looks_duplicated("да да")
+    assert not looks_duplicated("")

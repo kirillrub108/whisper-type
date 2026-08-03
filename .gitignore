@@ -8,9 +8,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Сборка PyInstaller (whispertype.spec — рукописный, коммитится)
+# Сборка PyInstaller и Inno Setup (whispertype.spec/installer.iss — рукописные, коммитятся)
 build/
 dist/
+dist_installer/
 *.manifest
 
 # Кэши инструментов

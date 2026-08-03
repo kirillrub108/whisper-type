@@ -18,12 +18,15 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# onedir, а не onefile: самораспаковывающийся стаб --onefile ведёт себя как
+# упаковщики вредоносов и заметно чаще ловит эвристику антивирусов. Папку
+# пользователь больше не увидит напрямую — она уходит внутрь инсталлятора
+# (installer.iss), который остаётся привычным одним .exe для скачивания.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="WhisperType",
     debug=False,
     bootloader_ignore_signals=False,
@@ -31,4 +34,13 @@ exe = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="WhisperType",
 )

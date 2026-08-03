@@ -37,8 +37,19 @@ pip install -r requirements-dev.txt -q || goto :error
 
 pyinstaller --clean --noconfirm whispertype.spec || goto :error
 
+set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC%" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC%" (
+    echo.
+    echo Готово: dist\WhisperType.exe
+    echo Inno Setup не найден — инсталлятор не собран. Поставьте его через
+    echo "winget install JRSoftware.InnoSetup", чтобы получить WhisperTypeSetup.exe.
+    exit /b 0
+)
+"%ISCC%" installer.iss || goto :error
+
 echo.
-echo Готово: dist\WhisperType.exe
+echo Готово: dist\WhisperType\WhisperType.exe и dist_installer\WhisperTypeSetup.exe
 exit /b 0
 
 :error

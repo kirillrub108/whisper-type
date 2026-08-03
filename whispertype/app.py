@@ -8,7 +8,6 @@ import sys
 import threading
 import time
 import types
-from collections import deque
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -19,11 +18,13 @@ from .config import (
     Config,
     config_path,
     ensure_dirs,
+    history_path,
     load_config,
     logs_dir,
     models_dir,
     write_config,
 )
+from .history import PhraseHistory
 from .hotkey import HotkeyListener
 from .keys import Hotkey, parse_hotkey
 from .logging_setup import setup_logging
@@ -41,7 +42,6 @@ log = logging.getLogger(__name__)
 
 _DEFAULT_COMBO = "right ctrl"
 _DEFAULT_CANCEL = "esc"
-_HISTORY_SIZE = 10
 
 
 class App:
@@ -69,9 +69,7 @@ class App:
         self._stream_thread: threading.Thread | None = None
         self._stream_stop = threading.Event()
         self._stream_parts: list[str] = []
-        # История живёт в памяти: читает её поток pystray, пишет — worker.
-        self._history: deque[str] = deque(maxlen=_HISTORY_SIZE)
-        self._history_lock = threading.Lock()
+        self.history = PhraseHistory(history_path())
         self._last_window = 0
 
     @staticmethod
@@ -100,6 +98,7 @@ class App:
 
     def _init(self) -> None:
         self.tray.set_state("loading")
+        self.history.load()
         self.recorder.start()
         self._worker = threading.Thread(target=self._worker_loop, name="worker", daemon=True)
         self._worker.start()
@@ -276,7 +275,7 @@ class App:
             if not text:
                 log.info("после постобработки текст пуст — ничего не вставляю")
                 return
-            self._remember(text)
+            self.history.add(text)
             self._inject(text)
         finally:
             self.state = "idle"
@@ -323,17 +322,10 @@ class App:
             if hwnd and not inject.is_own_window(hwnd) and not inject.is_shell_window(hwnd):
                 self._last_window = hwnd
 
-    def _remember(self, text: str) -> None:
-        with self._history_lock:
-            if self._history and self._history[-1] == text:
-                return  # подряд одно и то же — незачем занимать место в списке
-            self._history.append(text)
-
     @property
     def recent_phrases(self) -> list[str]:
         """Последние фразы, свежие сверху."""
-        with self._history_lock:
-            return list(reversed(self._history))
+        return self.history.recent()
 
     def insert_phrase(self, text: str) -> None:
         """Вставляет фразу из истории в то окно, что было активным до меню."""

@@ -24,6 +24,10 @@ def config_path() -> Path:
     return appdata_dir() / "config.json"
 
 
+def history_path() -> Path:
+    return appdata_dir() / "history.json"
+
+
 def models_dir() -> Path:
     return localappdata_dir() / "models"
 

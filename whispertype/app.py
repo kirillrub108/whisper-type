@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import types
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from . import __version__, autostart, inject
@@ -320,14 +321,26 @@ class App:
         self.listener.set_enabled(self.enabled)
         log.info("распознавание %s", "включено" if self.enabled else "выключено")
 
+    def _persist(self, apply: Callable[[Config], None]) -> None:
+        """Меняет одно поле поверх файла на диске, а не поверх снимка из памяти.
+
+        Снимок сделан при запуске, поэтому запись им целиком молча затирала бы
+        правки, внесённые в config.json руками при работающем приложении.
+        """
+        apply(self.cfg)
+        try:
+            on_disk, _warnings = load_config()
+            apply(on_disk)
+            write_config(on_disk)
+        except OSError:
+            log.exception("не удалось сохранить конфиг")
+
     def set_mode(self, mode: str) -> None:
-        self.cfg.hotkey.mode = mode
-        write_config(self.cfg)
+        self._persist(lambda cfg: setattr(cfg.hotkey, "mode", mode))
         log.info("режим переключён на %s", mode)
 
     def select_device(self, device: str | None) -> None:
-        self.cfg.audio.input_device = device
-        write_config(self.cfg)
+        self._persist(lambda cfg: setattr(cfg.audio, "input_device", device))
         self.recorder.set_device(device)
 
     def toggle_autostart(self) -> None:

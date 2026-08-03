@@ -13,7 +13,7 @@ def test_missing_file_creates_defaults(tmp_path: Path) -> None:
     assert path.exists()
     assert cfg.model.beam_size == 5
     assert cfg.model.languages == ["ru", "en"]
-    assert cfg.hotkey.mode == "push_to_talk"
+    assert cfg.hotkey.mode == "toggle"
 
 
 def test_broken_json_falls_back(tmp_path: Path) -> None:
@@ -53,7 +53,7 @@ def test_out_of_range_values_clamped(tmp_path: Path) -> None:
     )
     cfg, warnings = load_config(path)
     assert cfg.model.beam_size == 5
-    assert cfg.hotkey.mode == "push_to_talk"
+    assert cfg.hotkey.mode == "toggle"
     assert len(warnings) == 2
 
 

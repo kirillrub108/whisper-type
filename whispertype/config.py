@@ -84,7 +84,10 @@ class ModelConfig:
 class VadConfig:
     enabled: bool = True
     threshold: float = 0.35
-    min_silence_duration_ms: int = 2000
+    # Пауза, разделяющая сегменты. При крупном значении речь после короткой
+    # паузы попадает в один сегмент, и если там сменился язык, Whisper
+    # обрывает расшифровку — вторая половина записи теряется целиком.
+    min_silence_duration_ms: int = 500
     speech_pad_ms: int = 400
 
 
@@ -214,8 +217,8 @@ def _apply(target: Any, data: dict[str, Any], prefix: str, warnings: list[str]) 
 
 def _validate(cfg: Config, warnings: list[str]) -> None:
     if cfg.hotkey.mode not in ("push_to_talk", "toggle"):
-        warnings.append(f"hotkey.mode: неизвестный режим {cfg.hotkey.mode!r}, использован push_to_talk")
-        cfg.hotkey.mode = "push_to_talk"
+        warnings.append(f"hotkey.mode: неизвестный режим {cfg.hotkey.mode!r}, использован toggle")
+        cfg.hotkey.mode = "toggle"
     if cfg.inject.method not in ("clipboard", "type"):
         warnings.append(f"inject.method: неизвестный метод {cfg.inject.method!r}, использован clipboard")
         cfg.inject.method = "clipboard"
@@ -232,7 +235,7 @@ def _validate(cfg: Config, warnings: list[str]) -> None:
     if cfg.vad.speech_pad_ms < 0:
         cfg.vad.speech_pad_ms = 400
     if cfg.vad.min_silence_duration_ms < 0:
-        cfg.vad.min_silence_duration_ms = 2000
+        cfg.vad.min_silence_duration_ms = 500
     # Больше 29 с бессмысленно: кусок перестанет помещаться в окно энкодера.
     if not 5 <= cfg.streaming.chunk_seconds <= 29:
         warnings.append(

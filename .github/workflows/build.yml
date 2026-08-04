@@ -22,7 +22,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Test
-        run: pytest -q
+        run: python -m pytest -q
 
       - name: Lint
         run: ruff check whispertype tests

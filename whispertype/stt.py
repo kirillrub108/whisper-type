@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from .config import ModelConfig, VadConfig
+from .config import ModelConfig, VadConfig, resolve_cpu_threads
 from .textproc import collapse_duplicated, looks_duplicated
 
 log = logging.getLogger(__name__)
@@ -123,16 +123,18 @@ class Transcriber:
 
         self._models_dir.mkdir(parents=True, exist_ok=True)
         offline = self.is_cached()
+        threads = resolve_cpu_threads(self._cfg.cpu_threads)
         log.info(
-            "загрузка модели %s (compute=%s, threads=%d, offline=%s)",
-            self._cfg.repo, self._cfg.compute_type, self._cfg.cpu_threads, offline,
+            "загрузка модели %s (compute=%s, threads=%d%s, offline=%s)",
+            self._cfg.repo, self._cfg.compute_type, threads,
+            " авто" if self._cfg.cpu_threads is None else "", offline,
         )
         started = time.perf_counter()
         self._model = WhisperModel(
             self._cfg.repo,
             device="cpu",
             compute_type=self._cfg.compute_type,
-            cpu_threads=self._cfg.cpu_threads,
+            cpu_threads=threads,
             download_root=str(self._models_dir),
             local_files_only=offline,
         )

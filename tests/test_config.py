@@ -41,7 +41,7 @@ def test_wrong_type_keeps_default(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"model": {"cpu_threads": "six"}, "sounds": 1}), encoding="utf-8")
     cfg, warnings = load_config(path)
-    assert cfg.model.cpu_threads == 6
+    assert cfg.model.cpu_threads is None  # дефолт — автоподбор
     assert cfg.sounds is True
     assert len(warnings) == 2
 
@@ -81,6 +81,53 @@ def test_bad_hallucination_items_dropped(tmp_path: Path) -> None:
     path.write_text(json.dumps({"hallucination_patterns": ["ok", 5, None]}), encoding="utf-8")
     cfg, warnings = load_config(path)
     assert cfg.hallucination_patterns == ["ok"]
+    assert len(warnings) == 1
+
+
+def test_cpu_threads_explicit_value_wins(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from whispertype import config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod.os, "cpu_count", lambda: 12)
+    assert cfg_mod.resolve_cpu_threads(4) == 4
+
+
+def test_cpu_threads_auto_leaves_cpus_free(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from whispertype import config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod.os, "cpu_count", lambda: 12)
+    assert cfg_mod.resolve_cpu_threads(None) == 10
+    monkeypatch.setattr(cfg_mod.os, "cpu_count", lambda: 8)
+    assert cfg_mod.resolve_cpu_threads(None) == 6
+
+
+def test_cpu_threads_auto_never_below_one(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from whispertype import config as cfg_mod
+
+    # Одноядерная машина: logical - 2 ушло бы в ноль
+    monkeypatch.setattr(cfg_mod.os, "cpu_count", lambda: 1)
+    assert cfg_mod.resolve_cpu_threads(None) == 1
+
+
+def test_cpu_threads_auto_when_cpu_count_unknown(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from whispertype import config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod.os, "cpu_count", lambda: None)
+    assert cfg_mod.resolve_cpu_threads(None) == 2
+
+
+def test_cpu_threads_null_stays_auto(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"model": {"cpu_threads": None}}), encoding="utf-8")
+    cfg, warnings = load_config(path)
+    assert warnings == []
+    assert cfg.model.cpu_threads is None
+
+
+def test_cpu_threads_zero_falls_back_to_auto(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"model": {"cpu_threads": 0}}), encoding="utf-8")
+    cfg, warnings = load_config(path)
+    assert cfg.model.cpu_threads is None
     assert len(warnings) == 1
 
 

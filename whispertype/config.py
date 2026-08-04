@@ -12,6 +12,29 @@ from typing import Any
 APP_NAME = "WhisperType"
 
 
+# Сколько логических процессоров оставить свободными под захват звука, хук
+# хоткея и трей: инференс не должен занимать машину целиком, иначе эти лёгкие,
+# но чувствительные к задержкам потоки ждут своей очереди у планировщика.
+RESERVED_CPUS = 2
+
+
+def resolve_cpu_threads(configured: int | None) -> int:
+    """Число потоков инференса; None — подобрать по числу логических процессоров.
+
+    Замеры на Ryzen 5 7500F (6 ядер / 12 потоков, turbo, int8_float32, фраза
+    5.5 с): 6 потоков — 1.37 с, 8 — 1.22 с, 10 — 1.06 с, 12 — 1.10 с. Занимать
+    все логические потоки невыгодно: SMT-сосед делит с ядром одни и те же
+    исполнительные блоки, а матричные умножения их и так насыщают, поэтому
+    сверх физических ядер прирост даёт только частичную загрузку SMT.
+    Проверено на одной машине — на других формула может быть неоптимальной,
+    поэтому значение всегда можно задать явно.
+    """
+    if configured is not None:
+        return configured
+    logical = os.cpu_count() or 4
+    return max(1, logical - RESERVED_CPUS)
+
+
 def appdata_dir() -> Path:
     return Path(os.environ.get("APPDATA", str(Path.home()))) / APP_NAME
 
@@ -65,7 +88,8 @@ DEFAULT_HALLUCINATION_PATTERNS: tuple[str, ...] = (
 class ModelConfig:
     repo: str = "deepdml/faster-whisper-large-v3-turbo-ct2"
     compute_type: str = "int8_float32"
-    cpu_threads: int = 6
+    # null — подобрать по числу логических процессоров (см. resolve_cpu_threads).
+    cpu_threads: int | None = None
     beam_size: int = 5
     # Заданный язык экономит отдельный проход энкодера на автоопределении (вдвое быстрее).
     # null — определять автоматически по списку languages, но платить этим проходом.
@@ -163,7 +187,7 @@ _FIELD_TYPES: dict[str, tuple[type, ...]] = {
     "hallucination_patterns": (list,),
     "repo": (str,),
     "compute_type": (str,),
-    "cpu_threads": (int,),
+    "cpu_threads": (int, type(None)),
     "beam_size": (int,),
     "language": (str, type(None)),
     "languages": (list,),
@@ -249,9 +273,9 @@ def _validate(cfg: Config, warnings: list[str]) -> None:
             f"streaming.chunk_seconds: {cfg.streaming.chunk_seconds} вне диапазона 5–29, использовано 8"
         )
         cfg.streaming.chunk_seconds = 8
-    if cfg.model.cpu_threads < 1:
-        warnings.append("model.cpu_threads: значение < 1, использовано 6")
-        cfg.model.cpu_threads = 6
+    if cfg.model.cpu_threads is not None and cfg.model.cpu_threads < 1:
+        warnings.append("model.cpu_threads: значение < 1, включён автоподбор")
+        cfg.model.cpu_threads = None
     if not 1 <= cfg.audio.max_record_seconds <= 600:
         warnings.append("audio.max_record_seconds: вне диапазона 1–600, использовано 120")
         cfg.audio.max_record_seconds = 120

@@ -30,7 +30,7 @@ from .keys import Hotkey, parse_hotkey
 from .logging_setup import setup_logging
 from .overlay import Overlay
 from .sounds import Sounds
-from .stt import Transcriber
+from .stt import MAX_NARROW_SECONDS, Transcriber
 from .textproc import postprocess
 from .tray import Tray
 from .winutil import acquire_single_instance, show_message
@@ -204,8 +204,7 @@ class App:
         не растёт вместе с длиной диктовки.
         """
         target = self.cfg.streaming.chunk_seconds * SAMPLE_RATE
-        # 29 с — предел одного окна энкодера, дальше кусок обойдётся вдвое дороже.
-        hard_max = 29 * SAMPLE_RATE
+        hard_max = MAX_NARROW_SECONDS * SAMPLE_RATE
         while not self._stream_stop.wait(0.25):
             if self.recorder.pending_samples() < target:
                 continue
@@ -243,14 +242,17 @@ class App:
 
     def _finish(self) -> None:
         self.listener.set_recording(False)
-        self._stop_stream()
-        audio = self.recorder.end()
-        parts = self._stream_parts
-        self._stream_parts = []
+        # Переключаем индикатор сразу, а не после _stop_stream(): тот может
+        # ждать до 60 с последний потоковый кусок, и всё это время красная
+        # плашка «Запись» лгала бы — микрофон пользователь уже отпустил.
         self.state = "processing"
         self.tray.set_state("processing")
         self._overlay_show("processing")
         self.sounds.record_stop()
+        self._stop_stream()
+        audio = self.recorder.end()
+        parts = self._stream_parts
+        self._stream_parts = []
         try:
             duration_ms = len(audio) / SAMPLE_RATE * 1000
             if duration_ms < self.cfg.audio.min_record_ms:

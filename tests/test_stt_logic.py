@@ -94,6 +94,14 @@ def test_window_boundary_exactly_full() -> None:
     assert window_frames_for(boundary - 1, True) == FULL_WINDOW_FRAMES - 100
 
 
+def test_max_narrow_seconds_still_narrows() -> None:
+    from whispertype.stt import MAX_NARROW_SECONDS, window_frames_for
+
+    # Инвариант, на который опирается потоковая нарезка (app.py): кусок
+    # длиной ровно до этой границы обязан остаться в дешёвом узком окне.
+    assert window_frames_for(float(MAX_NARROW_SECONDS), True) is not None
+
+
 def test_encoder_window_restores_original() -> None:
     import faster_whisper.transcribe as ftr
 

@@ -32,6 +32,12 @@ FULL_WINDOW_FRAMES = 3000  # штатное окно Whisper — 30 с
 # поэтому окно снизу ограничено 12 с — для короткой фразы это всё равно ~1 с.
 WINDOW_MARGIN_SECONDS = 4
 MIN_WINDOW_FRAMES = 1200
+# С этой длины (и выше) окно перестаёт сужаться (см. window_frames_for) и
+# распознавание проваливается в дорогой полный проход с таймкодами — тот самый,
+# ради ухода от которого затевалось сужение. Потоковая нарезка держит куски
+# строго ниже этой границы, чтобы вынужденный разрез посреди сплошной речи
+# не превращал долгую фразу в многосекундное зависание.
+MAX_NARROW_SECONDS = FULL_WINDOW_FRAMES // FRAMES_PER_SECOND - WINDOW_MARGIN_SECONDS - 1
 
 
 def window_frames_for(duration_seconds: float, enabled: bool) -> int | None:

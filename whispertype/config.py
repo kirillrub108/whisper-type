@@ -267,10 +267,11 @@ def _validate(cfg: Config, warnings: list[str]) -> None:
         cfg.vad.speech_pad_ms = 400
     if cfg.vad.min_silence_duration_ms < 0:
         cfg.vad.min_silence_duration_ms = 500
-    # Больше 29 с бессмысленно: кусок перестанет помещаться в окно энкодера.
-    if not 5 <= cfg.streaming.chunk_seconds <= 29:
+    # Больше stt.MAX_NARROW_SECONDS (сейчас 25) кусок перестаёт помещаться
+    # в сужаемое окно энкодера и резко дорожает — см. комментарий там.
+    if not 5 <= cfg.streaming.chunk_seconds <= 25:
         warnings.append(
-            f"streaming.chunk_seconds: {cfg.streaming.chunk_seconds} вне диапазона 5–29, использовано 8"
+            f"streaming.chunk_seconds: {cfg.streaming.chunk_seconds} вне диапазона 5–25, использовано 8"
         )
         cfg.streaming.chunk_seconds = 8
     if cfg.model.cpu_threads is not None and cfg.model.cpu_threads < 1:

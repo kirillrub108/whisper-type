@@ -131,6 +131,14 @@ def test_cpu_threads_zero_falls_back_to_auto(tmp_path: Path) -> None:
     assert len(warnings) == 1
 
 
+def test_chunk_seconds_above_narrow_ceiling_falls_back(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"streaming": {"chunk_seconds": 29}}), encoding="utf-8")
+    cfg, warnings = load_config(path)
+    assert cfg.streaming.chunk_seconds == 8
+    assert len(warnings) == 1
+
+
 def test_config_with_utf8_bom_is_read(tmp_path: Path) -> None:
     # Блокнот Windows и PowerShell сохраняют UTF-8 с BOM
     path = tmp_path / "config.json"

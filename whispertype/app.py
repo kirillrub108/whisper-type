@@ -99,6 +99,7 @@ class App:
     def _init(self) -> None:
         self.tray.set_state("loading")
         self.history.load()
+        self.tray.refresh_menu()  # меню собрано до загрузки истории с диска
         self.recorder.start()
         self._worker = threading.Thread(target=self._worker_loop, name="worker", daemon=True)
         self._worker.start()
@@ -255,18 +256,22 @@ class App:
         self._stream_parts = []
         try:
             duration_ms = len(audio) / SAMPLE_RATE * 1000
-            peak = self.recorder.peak_amplitude()
+            level = self.recorder.peak_level()
+            log.info("уровень записи %.5f (порог тишины %.5f)",
+                     level, self.cfg.audio.silence_threshold)
             if duration_ms < self.cfg.audio.min_record_ms:
                 if not parts:
                     log.info("запись слишком короткая (%.0f мс) — игнорирую", duration_ms)
                     return
                 tail = ""  # хвост после последнего куска — обрывок, распознавать нечего
-            elif not parts and is_silence(peak, self.cfg.audio.silence_threshold):
+            elif is_silence(level, self.cfg.audio.silence_threshold):
                 # Проверка до transcribe(): normalize_audio внутри него вытягивает
                 # шум до нормального уровня, и тишину станет не отличить от речи.
+                # Уже распознанные куски отбрасываем: на тишине это галлюцинации
+                # модели, а не речь — вставлять их вреднее, чем ничего.
                 log.warning(
-                    "тишина в записи: пик %.4f < порога %.4f — распознавание пропущено",
-                    peak, self.cfg.audio.silence_threshold,
+                    "тишина в записи: уровень %.5f < порога %.5f, кусков отброшено %d",
+                    level, self.cfg.audio.silence_threshold, len(parts),
                 )
                 self.tray.notify("Вас не слышно — проверьте микрофон")
                 self.sounds.error()
@@ -289,6 +294,7 @@ class App:
                 log.info("после постобработки текст пуст — ничего не вставляю")
                 return
             self.history.add(text)
+            self.tray.refresh_menu()
             self._inject(text)
         finally:
             self.state = "idle"

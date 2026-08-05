@@ -54,7 +54,8 @@ def test_cut_prefers_quietest_of_several_gaps() -> None:
 
 
 def test_is_silence_below_threshold() -> None:
-    assert is_silence(0.001, 0.005) is True
+    # уровень молчащего микрофона — замер на реальном железе давал ~0.00007
+    assert is_silence(0.0001, 0.005) is True
 
 
 def test_is_silence_above_threshold() -> None:

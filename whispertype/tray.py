@@ -73,6 +73,18 @@ class Tray:
         self._icon.icon = self._images[state]
         self._icon.title = f"{APP_NAME} — {_STATE_LABELS[state]}"
 
+    def refresh_menu(self) -> None:
+        """Пересобирает меню под текущее состояние.
+
+        Windows-бэкенд pystray строит HMENU один раз и по клику показывает его
+        кэш, поэтому генераторы пунктов сами не перечитываются: без этого вызова
+        «Последние фразы» навсегда остаются такими, какими были при запуске.
+        """
+        try:
+            self._icon.update_menu()
+        except Exception:
+            log.exception("не удалось обновить меню трея")
+
     def notify(self, message: str, title: str = APP_NAME) -> None:
         try:
             self._icon.notify(message, title)

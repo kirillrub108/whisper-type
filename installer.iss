@@ -4,7 +4,7 @@
 ;
 ; AppId — сгенерированный один раз GUID, не менять между версиями: по нему
 ; Windows опознаёт «это то же приложение» при обновлении и в списке программ.
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.1"
 
 [Setup]
 AppId={{2E17A9B0-9EE0-4E3F-9EA8-2ED6D890F960}

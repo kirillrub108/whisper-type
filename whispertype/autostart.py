@@ -27,12 +27,18 @@ def _command() -> str:
 
 
 def is_enabled() -> bool:
+    """True — автозапуск включён именно для этой копии программы.
+
+    Путь сверяется, а не просто проверяется наличие записи: запись, оставшаяся
+    от переехавшей или удалённой копии, Windows выполняет молча и молча же
+    проваливает, а галочка в меню показывала бы, что всё в порядке.
+    """
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
-            winreg.QueryValueEx(key, APP_NAME)
-        return True
+            value, _value_type = winreg.QueryValueEx(key, APP_NAME)
     except OSError:
         return False
+    return str(value) == _command()
 
 
 def set_enabled(enabled: bool) -> bool:

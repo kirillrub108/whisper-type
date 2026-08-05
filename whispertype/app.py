@@ -43,6 +43,8 @@ log = logging.getLogger(__name__)
 _DEFAULT_COMBO = "right ctrl"
 _DEFAULT_CANCEL = "esc"
 
+UNHEARD_AFTER_SECONDS = 2.0
+
 
 class App:
     def __init__(self, cfg: Config) -> None:
@@ -57,13 +59,14 @@ class App:
             cfg.audio.input_device,
             cfg.audio.max_record_seconds,
             lambda: self._events.put("limit"),
+            cfg.audio.silence_threshold,
         )
         self.transcriber = Transcriber(cfg.model, cfg.vad, models_dir())
         hotkey = self._parse_or_default(cfg.hotkey.combo, _DEFAULT_COMBO)
         cancel = self._parse_or_default(cfg.hotkey.cancel, _DEFAULT_CANCEL)
         self._hotkey_vks = hotkey.all_vks()
         self.listener = HotkeyListener(hotkey, cancel, self._events.put)
-        self.overlay = Overlay() if cfg.overlay.enabled else None
+        self.overlay = Overlay(self._unheard) if cfg.overlay.enabled else None
         self.tray = Tray(self)
         self._worker: threading.Thread | None = None
         self._stream_thread: threading.Thread | None = None
@@ -300,6 +303,10 @@ class App:
             self.state = "idle"
             self.tray.set_state("idle")
             self._overlay_hide()
+
+    def _unheard(self) -> bool:
+        """Микрофон молчит дольше UNHEARD_AFTER_SECONDS — оверлею пора подсказать."""
+        return self.recorder.silent_seconds() >= UNHEARD_AFTER_SECONDS
 
     def _overlay_show(self, state: str) -> None:
         if self.overlay is not None:

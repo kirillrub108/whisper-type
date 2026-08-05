@@ -12,6 +12,7 @@ import logging
 import math
 import os
 import threading
+from collections.abc import Callable
 from ctypes import wintypes
 from pathlib import Path
 
@@ -59,6 +60,10 @@ _STATES: dict[str, tuple[tuple[int, int, int], str]] = {
     "recording": ((233, 74, 63), "Запись"),
     "processing": ((242, 166, 0), "Распознаю"),
 }
+
+_HINT_TEXT = "Вас не слышно"
+_HINT_COLOUR = (255, 178, 76)
+_HINT_GAP = 13  # отступ от «Запись» до разделителя и от разделителя до подсказки
 
 
 class WNDCLASSEXW(ctypes.Structure):
@@ -188,12 +193,29 @@ def _work_area() -> tuple[int, int, int, int]:
     return rect.left, rect.top, rect.right, rect.bottom
 
 
-def _render(state: str, phase: float, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> Image.Image:
+def _render(
+    state: str,
+    phase: float,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    unheard: bool = False,
+) -> Image.Image:
     colour, label = _STATES[state]
-    img = Image.new("RGBA", (_WIDTH, _HEIGHT), (0, 0, 0, 0))
+    # Подсказка прирастает слева: плашка прижата к правому краю экрана, и сам
+    # индикатор записи должен остаться на месте, а не прыгать вбок.
+    offset = 0
+    if unheard:
+        offset = 16 + int(font.getlength(_HINT_TEXT)) + _HINT_GAP * 2 + 1
+    width = offset + _WIDTH
+    img = Image.new("RGBA", (width, _HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle((0, 0, _WIDTH - 1, _HEIGHT - 1), radius=_HEIGHT // 2, fill=(28, 28, 32, 232))
-    cx, cy = 21, _HEIGHT // 2
+    draw.rounded_rectangle((0, 0, width - 1, _HEIGHT - 1), radius=_HEIGHT // 2, fill=(28, 28, 32, 232))
+    if unheard:
+        draw.text((16, _HEIGHT // 2), _HINT_TEXT, font=font,
+                  fill=(*_HINT_COLOUR, 255), anchor="lm")
+        # Разделитель: подсказка — отдельное сообщение, а не продолжение подписи.
+        line_x = offset - _HINT_GAP
+        draw.line((line_x, 11, line_x, _HEIGHT - 12), fill=(255, 255, 255, 46))
+    cx, cy = offset + 21, _HEIGHT // 2
     if state == "recording":
         # Пульсация показывает, что запись именно идёт, а не «залипла».
         glow = 3.0 + 2.6 * (0.5 + 0.5 * math.sin(phase))
@@ -203,20 +225,23 @@ def _render(state: str, phase: float, font: ImageFont.FreeTypeFont | ImageFont.I
     else:
         radius = 5.0
     draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=(*colour, 255))
-    draw.text((38, _HEIGHT // 2), label, font=font, fill=(238, 238, 242, 255), anchor="lm")
+    draw.text((offset + 38, _HEIGHT // 2), label, font=font, fill=(238, 238, 242, 255), anchor="lm")
     return img
 
 
 class Overlay(threading.Thread):
     """Показывает индикатор поверх всех окон. show()/hide() — из любого потока."""
 
-    def __init__(self) -> None:
+    def __init__(self, unheard_probe: Callable[[], bool] | None = None) -> None:
         super().__init__(name="overlay", daemon=True)
         self._hwnd: int = 0
         self._state: str | None = None
         self._phase = 0.0
         self._ready = threading.Event()
         self._font = _load_font(14)
+        # Спрашиваем на каждом кадре, а не ждём push извне: своего таймера на
+        # 15 кадров/с хватает, чтобы подсказка появилась вовремя без ещё одного потока.
+        self._unheard_probe = unheard_probe
         self._proc = _WNDPROC(self._wnd_proc)  # ссылку держим: иначе GC снесёт callback
 
     def show(self, state: str) -> None:
@@ -271,11 +296,17 @@ class Overlay(threading.Thread):
         state = self._state
         if state is None or not self._hwnd:
             return
-        image = _render(state, self._phase, self._font)
+        unheard = state == "recording" and self._unheard_probe is not None and self._unheard_probe()
+        image = _render(state, self._phase, self._font, unheard)
         self._push_bitmap(image)
 
     def _push_bitmap(self, image: Image.Image) -> None:
-        """Отдаёт RGBA-картинку в слоёное окно через UpdateLayeredWindow."""
+        """Отдаёт RGBA-картинку в слоёное окно через UpdateLayeredWindow.
+
+        Размеры берём у картинки: с подсказкой «Вас не слышно» плашка шире, а
+        UpdateLayeredWindow заодно и меняет размер окна под неё.
+        """
+        width, height = image.size
         arr = np.array(image, dtype=np.uint8)
         alpha = arr[:, :, 3].astype(np.uint16)
         # UpdateLayeredWindow ждёт BGRA с premultiplied alpha.
@@ -287,8 +318,8 @@ class Overlay(threading.Thread):
         mem_dc = _gdi32.CreateCompatibleDC(screen_dc)
         info = BITMAPINFO()
         info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        info.bmiHeader.biWidth = _WIDTH
-        info.bmiHeader.biHeight = -_HEIGHT  # отрицательная высота = строки сверху вниз
+        info.bmiHeader.biWidth = width
+        info.bmiHeader.biHeight = -height  # отрицательная высота = строки сверху вниз
         info.bmiHeader.biPlanes = 1
         info.bmiHeader.biBitCount = 32
         info.bmiHeader.biCompression = 0  # BI_RGB
@@ -305,8 +336,8 @@ class Overlay(threading.Thread):
             ctypes.memmove(bits, buf, len(buf))
             old = _gdi32.SelectObject(mem_dc, bitmap)
             left, top, right, bottom = _work_area()
-            pos = wintypes.POINT(right - _WIDTH - _MARGIN, bottom - _HEIGHT - _MARGIN)
-            size = wintypes.SIZE(_WIDTH, _HEIGHT)
+            pos = wintypes.POINT(right - width - _MARGIN, bottom - height - _MARGIN)
+            size = wintypes.SIZE(width, height)
             src = wintypes.POINT(0, 0)
             blend = BLENDFUNCTION(AC_SRC_OVER, 0, 255, AC_SRC_ALPHA)
             ok = _user32.UpdateLayeredWindow(

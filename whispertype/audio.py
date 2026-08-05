@@ -82,15 +82,18 @@ class AudioRecorder:
         device: int | str | None,
         max_seconds: int,
         on_limit: Callable[[], None],
+        silence_threshold: float = 0.0,
     ) -> None:
         self._configured_device = device
         self._max_samples = max_seconds * SAMPLE_RATE
         self._on_limit = on_limit
+        self._silence_threshold = silence_threshold
         self._lock = threading.Lock()
         self._open_lock = threading.Lock()
         self._chunks: list[np.ndarray] = []
         self._total = 0
         self._level = 0.0
+        self._loud_at = 0.0
         self._recording = False
         self._limit_fired = False
         self._stream: sd.InputStream | None = None
@@ -113,6 +116,7 @@ class AudioRecorder:
             self._chunks = []
             self._total = 0
             self._level = 0.0
+            self._loud_at = time.monotonic()
             self._limit_fired = False
             self._recording = True
         return True
@@ -135,6 +139,19 @@ class AudioRecorder:
         """
         with self._lock:
             return self._level
+
+    def silent_seconds(self) -> float:
+        """Сколько секунд подряд микрофон молчит прямо сейчас. 0.0 — звук идёт.
+
+        Нужно во время записи, поэтому считается по ходу дела, а не по итоговому
+        буферу: к концу записи подсказывать уже поздно.
+        """
+        if self._silence_threshold <= 0:
+            return 0.0
+        with self._lock:
+            if not self._recording:
+                return 0.0
+            return time.monotonic() - self._loud_at
 
     def pending_samples(self) -> int:
         with self._lock:
@@ -180,7 +197,10 @@ class AudioRecorder:
             self._chunks.append(indata.copy())
             self._total += frames
             block = indata.reshape(-1)
-            self._level = max(self._level, float(np.sqrt(np.mean(block * block))))
+            rms = float(np.sqrt(np.mean(block * block)))
+            self._level = max(self._level, rms)
+            if rms >= self._silence_threshold:
+                self._loud_at = time.monotonic()
             if self._total >= self._max_samples and not self._limit_fired:
                 self._limit_fired = True
                 fire_limit = True

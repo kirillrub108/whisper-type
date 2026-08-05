@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from . import __version__, autostart, inject
-from .audio import SAMPLE_RATE, AudioRecorder
+from .audio import SAMPLE_RATE, AudioRecorder, is_silence
 from .config import (
     APP_NAME,
     Config,
@@ -255,11 +255,22 @@ class App:
         self._stream_parts = []
         try:
             duration_ms = len(audio) / SAMPLE_RATE * 1000
+            peak = self.recorder.peak_amplitude()
             if duration_ms < self.cfg.audio.min_record_ms:
                 if not parts:
                     log.info("запись слишком короткая (%.0f мс) — игнорирую", duration_ms)
                     return
                 tail = ""  # хвост после последнего куска — обрывок, распознавать нечего
+            elif not parts and is_silence(peak, self.cfg.audio.silence_threshold):
+                # Проверка до transcribe(): normalize_audio внутри него вытягивает
+                # шум до нормального уровня, и тишину станет не отличить от речи.
+                log.warning(
+                    "тишина в записи: пик %.4f < порога %.4f — распознавание пропущено",
+                    peak, self.cfg.audio.silence_threshold,
+                )
+                self.tray.notify("Вас не слышно — проверьте микрофон")
+                self.sounds.error()
+                return
             else:
                 started = time.perf_counter()
                 tail = self.transcriber.transcribe(audio)

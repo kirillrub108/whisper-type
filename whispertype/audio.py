@@ -53,6 +53,16 @@ def find_cut_point(
     return search_start + quietest * frame + frame // 2
 
 
+def is_silence(peak: float, threshold: float) -> bool:
+    """True, если пиковая амплитуда сессии ниже порога — микрофон молчал.
+
+    threshold <= 0 полностью отключает проверку.
+    """
+    if threshold <= 0:
+        return False
+    return peak < threshold
+
+
 def list_input_devices() -> list[str]:
     names: list[str] = []
     try:
@@ -80,6 +90,7 @@ class AudioRecorder:
         self._open_lock = threading.Lock()
         self._chunks: list[np.ndarray] = []
         self._total = 0
+        self._peak = 0.0
         self._recording = False
         self._limit_fired = False
         self._stream: sd.InputStream | None = None
@@ -101,6 +112,7 @@ class AudioRecorder:
         with self._lock:
             self._chunks = []
             self._total = 0
+            self._peak = 0.0
             self._limit_fired = False
             self._recording = True
         return True
@@ -114,6 +126,11 @@ class AudioRecorder:
         if not chunks:
             return np.zeros(0, dtype=np.float32)
         return np.concatenate([c.reshape(-1) for c in chunks]).astype(np.float32, copy=False)
+
+    def peak_amplitude(self) -> float:
+        """Пиковая амплитуда всей текущей сессии записи (не только последнего куска)."""
+        with self._lock:
+            return self._peak
 
     def pending_samples(self) -> int:
         with self._lock:
@@ -137,6 +154,7 @@ class AudioRecorder:
             self._recording = False
             self._chunks = []
             self._total = 0
+            self._peak = 0.0
 
     def set_device(self, device: int | str | None) -> None:
         self._configured_device = device
@@ -157,6 +175,7 @@ class AudioRecorder:
                 return
             self._chunks.append(indata.copy())
             self._total += frames
+            self._peak = max(self._peak, float(np.abs(indata).max()))
             if self._total >= self._max_samples and not self._limit_fired:
                 self._limit_fired = True
                 fire_limit = True

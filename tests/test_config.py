@@ -139,6 +139,26 @@ def test_chunk_seconds_above_narrow_ceiling_falls_back(tmp_path: Path) -> None:
     assert len(warnings) == 1
 
 
+def test_silence_threshold_default() -> None:
+    assert Config().audio.silence_threshold == 0.005
+
+
+def test_silence_threshold_out_of_range_falls_back(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"audio": {"silence_threshold": 1.5}}), encoding="utf-8")
+    cfg, warnings = load_config(path)
+    assert cfg.audio.silence_threshold == 0.005
+    assert len(warnings) == 1
+
+
+def test_silence_threshold_zero_allowed(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"audio": {"silence_threshold": 0.0}}), encoding="utf-8")
+    cfg, warnings = load_config(path)
+    assert cfg.audio.silence_threshold == 0.0
+    assert warnings == []
+
+
 def test_config_with_utf8_bom_is_read(tmp_path: Path) -> None:
     # Блокнот Windows и PowerShell сохраняют UTF-8 с BOM
     path = tmp_path / "config.json"

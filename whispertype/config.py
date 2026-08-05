@@ -144,6 +144,7 @@ class AudioConfig:
     input_device: int | str | None = None
     max_record_seconds: int = 120
     min_record_ms: int = 300
+    silence_threshold: float = 0.005
 
 
 @dataclass
@@ -207,6 +208,7 @@ _FIELD_TYPES: dict[str, tuple[type, ...]] = {
     "input_device": (int, str, type(None)),
     "max_record_seconds": (int,),
     "min_record_ms": (int,),
+    "silence_threshold": (int, float),
     "mode": (str,),
     "combo": (str,),
     "cancel": (str,),
@@ -283,6 +285,12 @@ def _validate(cfg: Config, warnings: list[str]) -> None:
     if cfg.audio.min_record_ms < 0:
         warnings.append("audio.min_record_ms: отрицательное значение, использовано 300")
         cfg.audio.min_record_ms = 300
+    if not 0.0 <= cfg.audio.silence_threshold <= 1.0:
+        warnings.append(
+            f"audio.silence_threshold: {cfg.audio.silence_threshold} вне диапазона 0–1, "
+            "использовано 0.005"
+        )
+        cfg.audio.silence_threshold = 0.005
     if cfg.inject.clipboard_restore_delay_ms < 0:
         cfg.inject.clipboard_restore_delay_ms = 150
     if cfg.inject.type_batch_size < 1:

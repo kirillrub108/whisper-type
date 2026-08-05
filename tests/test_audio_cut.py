@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from whispertype.audio import SAMPLE_RATE, find_cut_point
+from whispertype.audio import SAMPLE_RATE, find_cut_point, is_silence
 
 
 def _noisy(seconds: float, level: float = 0.4) -> np.ndarray:
@@ -51,3 +51,19 @@ def test_cut_prefers_quietest_of_several_gaps() -> None:
     cut = find_cut_point(audio, 9 * SAMPLE_RATE, MAX)
     silent_start = len(audio) - len(silent_gap) - SAMPLE_RATE
     assert silent_start <= cut <= silent_start + len(silent_gap)
+
+
+def test_is_silence_below_threshold() -> None:
+    assert is_silence(0.001, 0.005) is True
+
+
+def test_is_silence_above_threshold() -> None:
+    assert is_silence(0.02, 0.005) is False
+
+
+def test_is_silence_at_threshold_is_not_silence() -> None:
+    assert is_silence(0.005, 0.005) is False
+
+
+def test_is_silence_disabled_when_threshold_zero() -> None:
+    assert is_silence(0.0, 0.0) is False

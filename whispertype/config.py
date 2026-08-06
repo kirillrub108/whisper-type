@@ -160,7 +160,7 @@ class InjectConfig:
     clipboard_restore_delay_ms: int = 150
     type_batch_size: int = 16
     type_batch_delay_ms: int = 5
-    append_space: bool = False
+    append_space: bool = True
     strip_final_period: bool = False
 
 

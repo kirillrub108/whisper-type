@@ -80,7 +80,7 @@ classDiagram
         clipboard_restore_delay_ms: int = 150
         type_batch_size: int = 16
         type_batch_delay_ms: int = 5
-        append_space: bool = false
+        append_space: bool = true
         strip_final_period: bool = false
     }
     class OverlayConfig {

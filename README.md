@@ -191,7 +191,7 @@ Python не нужен — он требуется, только если вы �
 | `inject.clipboard_restore_delay_ms` | `150` | Пауза перед восстановлением буфера |
 | `inject.type_batch_size` | `16` | Символов в пачке для метода `type` |
 | `inject.type_batch_delay_ms` | `5` | Пауза между пачками |
-| `inject.append_space` | `false` | Пробел в конце вставки |
+| `inject.append_space` | `true` | Пробел в конце вставки |
 | `inject.strip_final_period` | `false` | Убирать финальную точку |
 | `hallucination_patterns` | список | Фразы-галлюцинации Whisper, вырезаются регистронезависимо |
 

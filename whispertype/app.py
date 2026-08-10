@@ -74,6 +74,7 @@ class App:
         self._stream_parts: list[str] = []
         self.history = PhraseHistory(history_path())
         self._last_window = 0
+        self._target_window = 0
 
     @staticmethod
     def _parse_or_default(spec: str, default: str) -> Hotkey:
@@ -183,6 +184,10 @@ class App:
                 self._finish()
 
     def _start_recording(self) -> None:
+        # Фиксируем окно-адресата сейчас: за время диктовки фокус может уйти
+        # в другое окно (например, клик по трею), а вставлять нужно туда,
+        # где пользователь был в момент нажатия хоткея.
+        self._target_window = self._last_window
         if not self.recorder.begin():
             self.tray.set_state("error")
             self.tray.notify("Микрофон недоступен. Проверьте устройство в меню трея.")
@@ -318,6 +323,14 @@ class App:
 
     def _inject(self, text: str) -> None:
         inject.wait_keys_released(self._hotkey_vks)
+        if self._target_window and inject.foreground_window() != self._target_window:
+            if not inject.focus_window(self._target_window):
+                inject.write_clipboard(text)
+                self.tray.notify(
+                    "Не удалось вернуть фокус исходному окну. Текст скопирован в буфер, "
+                    "нажмите Ctrl+V вручную."
+                )
+                return
         if inject.foreground_blocks_input():
             inject.write_clipboard(text)
             self.tray.notify(
